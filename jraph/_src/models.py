@@ -170,13 +170,13 @@ def GraphNetwork(
         tree.tree_map(lambda n: n.shape[0] == sum_n_node, nodes)):
       raise ValueError(
           'All node arrays in nest must contain the same number of nodes.')
-
-    sent_attributes = tree.tree_map(lambda n: n[senders], nodes)
-    received_attributes = tree.tree_map(lambda n: n[receivers], nodes)
-    # Here we scatter the global features to the corresponding edges,
-    # giving us tensors of shape [num_edges, global_feat].
-    global_edge_attributes = tree.tree_map(lambda g: jnp.repeat(
-        g, n_edge, axis=0, total_repeat_length=sum_n_edge), globals_)
+    if senders:
+        sent_attributes = tree.tree_map(lambda n: n[senders], nodes)
+        received_attributes = tree.tree_map(lambda n: n[receivers], nodes)
+        # Here we scatter the global features to the corresponding edges,
+        # giving us tensors of shape [num_edges, global_feat].
+        global_edge_attributes = tree.tree_map(lambda g: jnp.repeat(
+            g, n_edge, axis=0, total_repeat_length=sum_n_edge), globals_)
 
     if update_edge_fn:
       edges = update_edge_fn(edges, sent_attributes, received_attributes,
