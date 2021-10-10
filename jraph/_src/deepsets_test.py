@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import haiku as hk
 
 import jax.tree_util as tree
-
+import jraph
 from jraph._src import graph
 from jraph._src import models
 from jraph._src import utils
