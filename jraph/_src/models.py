@@ -358,17 +358,14 @@ def DeepSets(
     aggregate_nodes_for_globals_fn:
         AggregateNodesToGlobalsFn = utils.segment_sum):
   """Returns a method that applies a DeepSets layer.
-
   Implementation for the model described in https://arxiv.org/abs/1703.06114
   (M. Zaheer, S. Kottur, S. Ravanbakhsh, B. Poczos, R. Salakhutdinov, A. Smola).
   See also PointNet (https://arxiv.org/abs/1612.00593, C. Qi, H. Su, K. Mo,
   L. J. Guibas) for a related model.
-
   This module operates on sets, which can be thought of as graphs without
   edges. The nodes features are first updated based on their value and the
   globals features, and new globals features are then computed based on the
   updated nodes features.
-
   Args:
     update_node_fn: function used to update the nodes.
     update_global_fn: function used to update the globals.
@@ -378,12 +375,55 @@ def DeepSets(
   # DeepSets can be implemented with a GraphNetwork, with just a node
   # update function that takes nodes and globals, and a global update
   # function based on the updated node features.
-  return GraphNetwork(
-      update_edge_fn=None,
-      update_node_fn=lambda n, s, r, g: update_node_fn(n, g),
-      update_global_fn=lambda n, e, g: update_global_fn(n),
-      aggregate_nodes_for_globals_fn=aggregate_nodes_for_globals_fn)
 
+  def _ApplyDeepSet(graph):
+    """Applies a configured DeepSet to a graph.
+    Args:
+      graph: a `GraphsTuple` containing the graph.
+    Returns:
+      Updated `GraphsTuple`.
+    """
+    # pylint: disable=g-long-lambda
+    nodes, edges, receivers, senders, globals_, n_node, n_edge = graph
+
+    # Equivalent to jjnp.sum(n_node), but jittable
+    sum_n_node = tree.tree_leaves(nodes)[0].shape[0]
+
+    if not tree.tree_all(
+        tree.tree_map(lambda n: n.shape[0] == sum_n_node, nodes)):
+      raise ValueError(
+          'All node arrays in nest must contain the same number of nodes.')
+
+    if update_global_fn:
+      n_graph = n_node.shape[0]
+      graph_idx = jnp.arange(n_graph)
+      # To aggregate nodes and edges from each graph to global features,
+      # we first construct tensors that map the node to the corresponding graph.
+      # For example, if you have `n_node=[1,2]`, we construct the tensor
+      # [0, 1, 1]. We then do the same for edges.
+      node_gr_idx = jnp.repeat(
+          graph_idx, n_node, axis=0, total_repeat_length=sum_n_node)
+
+      # We use the aggregation function to pool the nodes/edges per graph.
+      node_attributes = tree.tree_map(
+          lambda n: aggregate_nodes_for_globals_fn(n, node_gr_idx, n_graph),
+          nodes)
+
+      # These pooled nodes are the ijnputs to the global update fn (NO EDGES)
+      globals_ = update_global_fn(node_attributes, globals_)
+
+    # pylint: enable=g-long-lambda
+    return gn_graph.GraphsTuple(
+        nodes=nodes,
+        edges=edges,
+        receivers=receivers,
+        senders=senders,
+        globals=globals_,
+        n_node=n_node,
+        n_edge=n_edge)
+
+
+  return _ApplyDeepSet
 
 def GraphNetGAT(
     update_edge_fn: GNUpdateEdgeFn,
